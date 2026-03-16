@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,9 +27,26 @@ func main() {
 		port = "8080"
 	}
 
+	// Messaging service reverse proxy
+	messagingURL := os.Getenv("MESSAGING_SERVICE_URL")
+	if messagingURL == "" {
+		messagingURL = "http://localhost:8082"
+	}
+	messagingTarget, err := url.Parse(messagingURL)
+	if err != nil {
+		log.Fatalf("Invalid MESSAGING_SERVICE_URL: %v", err)
+	}
+	messagingProxy := httputil.NewSingleHostReverseProxy(messagingTarget)
+	log.Printf("Messaging proxy configured → %s", messagingURL)
+
 	r := mux.NewRouter()
 	r.HandleFunc("/health", healthHandler).Methods("GET")
 	r.HandleFunc("/ready", readyHandler).Methods("GET")
+	r.PathPrefix("/conversations").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// TODO: replace with real authentication
+		r.Header.Set("X-User-ID", "11111111-1111-1111-1111-111111111111")
+		messagingProxy.ServeHTTP(w, r)
+	})
 
 	srv := &http.Server{
 		Addr:         ":" + port,
