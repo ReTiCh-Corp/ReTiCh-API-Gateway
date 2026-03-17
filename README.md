@@ -2,43 +2,128 @@
 
 Point d'entrée principal de la plateforme ReTiCh. Gère le routing, l'authentification et le load balancing vers les microservices.
 
+## Table des matières
+
+- [Fonctionnalités](#fonctionnalités)
+- [Architecture](#architecture)
+- [Prérequis](#prérequis)
+- [Configuration](#configuration)
+- [Démarrage rapide](#démarrage-rapide)
+- [Endpoints exposés](#endpoints-exposés)
+- [Authentification JWT](#authentification-jwt)
+- [Ajouter un nouveau microservice](#ajouter-un-nouveau-microservice)
+- [Structure du projet](#structure-du-projet)
+- [Tests](#tests)
+- [Docker](#docker)
+
 ## Fonctionnalités
 
-- Routing vers les microservices (Auth, User, Messaging)
-- Validation des tokens JWT
-- Rate limiting
-- Health checks
-- Métriques Prometheus
+- **Reverse Proxy** vers les microservices (Auth, User, Messaging)
+- **Validation JWT locale** (pas d'appel réseau à chaque requête)
+- **Injection automatique** des headers utilisateur (`X-User-ID`, `X-User-Email`, `X-User-Role`)
+- **Logging** des requêtes avec masquage des tokens
+- **Health checks**
+- **Graceful shutdown**
+- **Hot-reload** pour le développement
+
+## Architecture
+
+### Flux d'authentification
+
+```
+Client → API Gateway → Validation JWT locale → Microservice
+                ↓ si invalide/expiré
+            Retourne 401
+```
+
+L'API Gateway utilise une architecture **stateless** :
+- **Aucune base de données** : pas de stockage local
+- **Validation JWT locale** : le secret partagé `JWT_SECRET` permet de vérifier les tokens sans interroger le service Auth
+- **Proxy transparent** : transmet les requêtes aux microservices avec les informations utilisateur
+
+### Composants
+
+| Composant | Rôle | Fichier |
+|-----------|------|---------|
+| **Config** | Charge les variables d'environnement | `internal/config/config.go` |
+| **Middleware Auth** | Valide les JWT et injecte le contexte utilisateur | `internal/middleware/auth.go` |
+| **Proxy Auth** | Redirige les requêtes `/auth/*` vers le service Auth | `internal/proxy/auth.go` |
+| **Proxy Service** | Redirige les requêtes vers les autres microservices | `internal/proxy/service.go` |
+| **DevTools** | Génère des tokens JWT pour les tests (dev only) | `internal/devtools/token.go` |
 
 ## Prérequis
 
 - Go 1.22+
 - Docker (optionnel)
+- Un fichier `.env` avec le `JWT_SECRET` partagé
+
+## Configuration
+
+### Variables d'environnement
+
+Créer un fichier `.env` à la racine du projet :
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Description | Défaut | Obligatoire |
+|----------|-------------|--------|-------------|
+| `PORT` | Port du serveur | `8080` | Non |
+| `JWT_SECRET` | Secret partagé pour valider les JWT | - | **OUI** |
+| `JWT_ISSUER` | Émetteur attendu dans les tokens | `retich-auth` | Non |
+| `AUTH_SERVICE_URL` | URL du service Auth | `http://auth:8081` | Non |
+| `USER_SERVICE_URL` | URL du service User | `http://user:8083` | Non |
+| `MESSAGING_SERVICE_URL` | URL du service Messaging | `http://messaging:8082` | Non |
+| `NATS_URL` | URL du serveur NATS | `nats://nats:4222` | Non |
+| `REDIS_URL` | URL Redis | `redis:6379` | Non |
+| `LOG_LEVEL` | Niveau de log | `info` | Non |
+
+**IMPORTANT :** Le `JWT_SECRET` doit être **identique** sur tous les services de la plateforme ReTiCh.
 
 ## Démarrage rapide
 
-### Avec Docker (recommandé)
+### 1. Configuration
 
 ```bash
-# Depuis le repo ReTiCh-Infrastucture
-make up
+# Cloner le repo
+git clone https://github.com/ReTiCh-Corp/ReTiCh-API-Gateway.git
+cd ReTiCh-API-Gateway
+
+# Créer le fichier .env
+cp .env.example .env
+
+# Éditer .env et définir JWT_SECRET
+# JWT_SECRET=votre-secret-super-securise-ici
 ```
 
-### Sans Docker
+### 2. Installation des dépendances
 
 ```bash
-# Installer les dépendances
 go mod download
+```
 
+### 3. Lancement
+
+#### Sans Docker
+
+```bash
 # Lancer le serveur
 go run cmd/server/main.go
 
-# Ou compiler et exécuter
+# Ou compiler puis exécuter
 go build -o bin/server cmd/server/main.go
 ./bin/server
 ```
 
-### Développement avec hot-reload
+#### Avec Docker (recommandé en production)
+
+```bash
+# Depuis le repo ReTiCh-Infrastructure
+make up
+```
+
+#### Développement avec hot-reload
 
 ```bash
 # Installer Air
@@ -48,26 +133,251 @@ go install github.com/air-verse/air@latest
 air -c .air.toml
 ```
 
-## Configuration
+Le serveur démarre sur `http://localhost:8080`.
 
-Variables d'environnement:
+## Endpoints exposés
 
-| Variable | Description | Défaut |
-|----------|-------------|--------|
-| `PORT` | Port du serveur | `8080` |
-| `AUTH_SERVICE_URL` | URL du service Auth | `http://auth:8081` |
-| `USER_SERVICE_URL` | URL du service User | `http://user:8083` |
-| `MESSAGING_SERVICE_URL` | URL du service Messaging | `http://messaging:8082` |
-| `NATS_URL` | URL du serveur NATS | `nats://nats:4222` |
-| `REDIS_URL` | URL Redis | `redis:6379` |
-| `LOG_LEVEL` | Niveau de log | `info` |
+### Routes publiques (pas d'authentification)
 
-## Endpoints
+| Méthode | Endpoint | Description | Corps de la requête |
+|---------|----------|-------------|---------------------|
+| `GET` | `/health` | Health check de l'API Gateway | - |
+| `GET` | `/ready` | Readiness check | - |
+| `POST` | `/dev/generate-token` | Génère un JWT de test (dev only) | `{"user_id":"...","email":"...","role":"..."}` |
 
-| Méthode | Endpoint | Description |
-|---------|----------|-------------|
-| GET | `/health` | Health check |
-| GET | `/ready` | Readiness check |
+### Routes Auth (publiques, proxy vers le service Auth)
+
+| Méthode | Endpoint | Description | Destination |
+|---------|----------|-------------|-------------|
+| `POST` | `/api/v1/auth/login` | Connexion utilisateur | Auth service |
+| `POST` | `/api/v1/auth/register` | Inscription utilisateur | Auth service |
+| `POST` | `/api/v1/auth/refresh` | Renouveler le token | Auth service |
+| `POST` | `/api/v1/auth/logout` | Déconnexion utilisateur | Auth service |
+
+### Routes User (protégées par JWT)
+
+| Méthode | Endpoint | Description | Destination |
+|---------|----------|-------------|-------------|
+| `*` | `/api/v1/user/*` | Toutes les routes utilisateur | User service |
+
+**Exemples :**
+- `GET /api/v1/user/profile`
+- `PUT /api/v1/user/profile`
+- `GET /api/v1/user/:id`
+
+### Routes Messaging (protégées par JWT)
+
+| Méthode | Endpoint | Description | Destination |
+|---------|----------|-------------|-------------|
+| `*` | `/api/v1/messaging/*` | Toutes les routes de messagerie | Messaging service |
+
+**Exemples :**
+- `GET /api/v1/messaging/conversations`
+- `POST /api/v1/messaging/conversations/:id/messages`
+
+## Authentification JWT
+
+### Fonctionnement
+
+1. **Le client se connecte** via `POST /api/v1/auth/login`
+2. **Il reçoit un token JWT** (access_token + refresh_token)
+3. **Il envoie ce token** dans le header `Authorization: Bearer <token>` pour chaque requête
+4. **L'API Gateway valide le token localement** avec le `JWT_SECRET`
+5. **Si valide**, elle injecte les informations utilisateur et proxie vers le microservice
+6. **Si invalide**, elle retourne `401 Unauthorized`
+
+### Structure du token JWT
+
+Le token contient les claims suivants :
+
+```json
+{
+  "user_id": "user-123",
+  "email": "alice@retich.com",
+  "role": "admin",
+  "iss": "retich-auth",
+  "iat": 1234567890,
+  "exp": 1234568790
+}
+```
+
+### Headers injectés automatiquement
+
+Quand le JWT est valide, l'API Gateway ajoute ces headers avant de transmettre aux microservices :
+
+```
+X-User-ID: user-123
+X-User-Email: alice@retich.com
+X-User-Role: admin
+```
+
+Les microservices peuvent donc utiliser ces informations **sans valider le JWT eux-mêmes**.
+
+### Tester l'authentification
+
+```bash
+# 1. Générer un token de test
+curl -X POST http://localhost:8080/dev/generate-token \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"test-123","email":"test@retich.com","role":"admin"}'
+
+# Réponse :
+# {
+#   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+#   "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+#   "expires_in": 900
+# }
+
+# 2. Utiliser le token pour accéder à une route protégée
+curl http://localhost:8080/api/v1/user/profile \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+## Ajouter un nouveau microservice
+
+Vous souhaitez ajouter un nouveau microservice (par exemple **Payment**) à la plateforme ? Suivez ces étapes :
+
+### 1. Ajouter la variable d'environnement
+
+**Fichier `.env.example` :**
+```bash
+PAYMENT_SERVICE_URL=http://payment:8084
+```
+
+**Fichier `internal/config/config.go` :**
+```go
+type Config struct {
+    // ... autres champs
+    PaymentServiceURL string
+}
+
+func Load() *Config {
+    return &Config{
+        // ... autres champs
+        PaymentServiceURL: getEnv("PAYMENT_SERVICE_URL", "http://payment:8084"),
+    }
+}
+```
+
+### 2. Créer le proxy dans `main.go`
+
+**Fichier `cmd/server/main.go` :**
+
+```go
+func main() {
+    cfg := config.Load()
+    authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, cfg.JWTIssuer)
+
+    // ... proxies existants
+    paymentProxy := proxy.NewServiceProxy(cfg.PaymentServiceURL)
+
+    r := mux.NewRouter()
+
+    // ... routes existantes
+
+    // Routes payment (protégées par JWT)
+    paymentRouter := r.PathPrefix("/api/v1/payment").Subrouter()
+    paymentRouter.Use(authMiddleware.ValidateJWT)
+    paymentRouter.PathPrefix("/").HandlerFunc(paymentProxy.ProxyRequest)
+
+    // ... reste du code
+}
+```
+
+### 3. Mettre à jour la documentation
+
+Ajouter dans ce README :
+- La variable `PAYMENT_SERVICE_URL` dans la section Configuration
+- Les routes exposées dans la section Endpoints
+
+### 4. Redémarrer l'API Gateway
+
+```bash
+# Relancer le serveur
+go run cmd/server/main.go
+```
+
+### Exemple complet
+
+Voici le diff pour ajouter le service **Payment** :
+
+**`internal/config/config.go` :**
+```diff
+type Config struct {
+    Port                string
+    JWTSecret           string
+    JWTIssuer           string
+    AuthServiceURL      string
+    UserServiceURL      string
+    MessagingServiceURL string
++   PaymentServiceURL   string
+    NatsURL             string
+    RedisURL            string
+    LogLevel            string
+}
+
+func Load() *Config {
+    return &Config{
+        Port:                getEnv("PORT", "8080"),
+        JWTSecret:           jwtSecret,
+        JWTIssuer:           getEnv("JWT_ISSUER", "retich-auth"),
+        AuthServiceURL:      authServiceURL,
+        UserServiceURL:      getEnv("USER_SERVICE_URL", "http://user:8083"),
+        MessagingServiceURL: getEnv("MESSAGING_SERVICE_URL", "http://messaging:8082"),
++       PaymentServiceURL:   getEnv("PAYMENT_SERVICE_URL", "http://payment:8084"),
+        NatsURL:             getEnv("NATS_URL", "nats://nats:4222"),
+        RedisURL:            getEnv("REDIS_URL", "redis:6379"),
+        LogLevel:            getEnv("LOG_LEVEL", "info"),
+    }
+}
+```
+
+**`cmd/server/main.go` :**
+```diff
+func main() {
+    cfg := config.Load()
+    authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, cfg.JWTIssuer)
+
+    authProxy := proxy.NewAuthProxy(cfg.AuthServiceURL)
+    userProxy := proxy.NewServiceProxy(cfg.UserServiceURL)
+    messagingProxy := proxy.NewServiceProxy(cfg.MessagingServiceURL)
++   paymentProxy := proxy.NewServiceProxy(cfg.PaymentServiceURL)
+    devToolsHandler := devtools.NewDevToolsHandler(cfg.JWTSecret, cfg.JWTIssuer)
+
+    r := mux.NewRouter()
+
+    // Routes publiques
+    r.HandleFunc("/health", healthHandler).Methods("GET")
+    r.HandleFunc("/ready", readyHandler).Methods("GET")
+    r.HandleFunc("/dev/generate-token", devToolsHandler.GenerateToken).Methods("POST")
+
+    // Routes auth
+    authRouter := r.PathPrefix("/api/v1/auth").Subrouter()
+    authRouter.HandleFunc("/login", authProxy.HandleLogin).Methods("POST")
+    authRouter.HandleFunc("/register", authProxy.HandleRegister).Methods("POST")
+    authRouter.HandleFunc("/refresh", authProxy.HandleRefresh).Methods("POST")
+    authRouter.HandleFunc("/logout", authProxy.HandleLogout).Methods("POST")
+
+    // Routes user
+    userRouter := r.PathPrefix("/api/v1/user").Subrouter()
+    userRouter.Use(authMiddleware.ValidateJWT)
+    userRouter.PathPrefix("/").HandlerFunc(userProxy.ProxyRequest)
+
+    // Routes messaging
+    messagingRouter := r.PathPrefix("/api/v1/messaging").Subrouter()
+    messagingRouter.Use(authMiddleware.ValidateJWT)
+    messagingRouter.PathPrefix("/").HandlerFunc(messagingProxy.ProxyRequest)
+
++   // Routes payment
++   paymentRouter := r.PathPrefix("/api/v1/payment").Subrouter()
++   paymentRouter.Use(authMiddleware.ValidateJWT)
++   paymentRouter.PathPrefix("/").HandlerFunc(paymentProxy.ProxyRequest)
+
+    // ... reste du code
+}
+```
+
+C'est tout ! Votre nouveau microservice est maintenant accessible via l'API Gateway.
 
 ## Structure du projet
 
@@ -75,14 +385,87 @@ Variables d'environnement:
 ReTiCh-API-Gateway/
 ├── cmd/
 │   └── server/
-│       └── main.go         # Point d'entrée
-├── internal/               # Code interne
-├── migrations/             # Migrations DB (si nécessaire)
-├── Dockerfile              # Image production
-├── Dockerfile.dev          # Image développement
-├── .air.toml               # Config hot-reload
-├── go.mod
-└── go.sum
+│       └── main.go                  # Point d'entrée principal du serveur
+├── internal/
+│   ├── config/
+│   │   └── config.go                # Chargement des variables d'environnement
+│   ├── middleware/
+│   │   └── auth.go                  # Middleware de validation JWT
+│   ├── proxy/
+│   │   ├── auth.go                  # Proxy vers le service Auth
+│   │   └── service.go               # Proxy générique vers les microservices
+│   └── devtools/
+│       └── token.go                 # Générateur de tokens JWT (dev only)
+├── .air.toml                        # Configuration hot-reload
+├── .env.example                     # Template des variables d'environnement
+├── .env                             # Variables d'environnement (ne pas commit)
+├── Dockerfile                       # Image production
+├── Dockerfile.dev                   # Image développement
+├── go.mod                           # Dépendances Go
+├── go.sum                           # Checksums des dépendances
+├── README.md                        # Documentation
+└── TEST.md                          # Guide de test manuel
+
+```
+
+### Détail des composants
+
+#### `cmd/server/main.go`
+Point d'entrée de l'application. Gère :
+- Chargement de la configuration
+- Initialisation des middlewares et proxies
+- Définition des routes
+- Démarrage du serveur HTTP
+- Graceful shutdown
+
+#### `internal/config/config.go`
+Charge les variables d'environnement et fournit une structure `Config` avec des valeurs par défaut.
+
+#### `internal/middleware/auth.go`
+Contient deux middlewares :
+- **`ValidateJWT`** : Bloque les requêtes si le token est absent ou invalide (pour routes protégées)
+- **`OptionalJWT`** : Extrait les infos du token s'il est présent, mais ne bloque pas (pour routes optionnellement authentifiées)
+
+#### `internal/proxy/auth.go`
+Proxy spécifique pour les routes `/api/v1/auth/*`. Transmet les requêtes au service Auth.
+
+#### `internal/proxy/service.go`
+Proxy générique pour les autres microservices. Transmet les requêtes et copie les headers (incluant `X-User-*`).
+
+#### `internal/devtools/token.go`
+Générateur de tokens JWT pour faciliter les tests en développement. **À désactiver en production**.
+
+## Tests
+
+### Tests manuels
+
+Suivez le guide dans `TEST.md` pour tester manuellement avec `curl` ou Postman.
+
+```bash
+# 1. Démarrer le serveur
+go run cmd/server/main.go
+
+# 2. Générer un token
+curl -X POST http://localhost:8080/dev/generate-token \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"test","email":"test@retich.com","role":"admin"}'
+
+# 3. Tester avec le token
+curl http://localhost:8080/api/v1/user/profile \
+  -H "Authorization: Bearer <token>"
+```
+
+### Tests unitaires (à venir)
+
+```bash
+# Lancer les tests
+go test ./...
+
+# Avec couverture
+go test -cover ./...
+
+# Avec détails
+go test -v ./...
 ```
 
 ## Docker
@@ -100,23 +483,95 @@ docker build -f Dockerfile.dev -t retich-api-gateway:dev .
 ### Exécution
 
 ```bash
-docker run -p 8080:8080 retich-api-gateway
-```
+# Avec variables d'environnement inline
+docker run -p 8080:8080 \
+  -e JWT_SECRET=your-secret \
+  -e AUTH_SERVICE_URL=http://auth:8081 \
+  retich-api-gateway
 
-## Tests
-
-```bash
-# Lancer les tests
-go test ./...
-
-# Avec couverture
-go test -cover ./...
+# Ou avec un fichier .env
+docker run -p 8080:8080 --env-file .env retich-api-gateway
 ```
 
 ## CI/CD
 
 Le workflow GitHub Actions build et push automatiquement vers `ghcr.io/retich-corp/api-gateway` sur chaque push sur `main`.
 
+### Déploiement
+
+L'API Gateway est déployée via Docker Compose depuis le repo `ReTiCh-Infrastructure`.
+
+## Sécurité
+
+### Bonnes pratiques
+
+1. **Ne jamais commit le `.env`** (déjà dans `.gitignore`)
+2. **Utiliser un `JWT_SECRET` fort** (minimum 32 caractères aléatoires)
+3. **Désactiver `/dev/generate-token` en production** (ou le protéger par IP whitelisting)
+4. **Utiliser HTTPS en production** (via reverse proxy nginx/Traefik)
+5. **Limiter les logs sensibles** (tokens déjà masqués)
+
+### Variables sensibles
+
+```bash
+# Générer un secret sécurisé
+openssl rand -base64 32
+# Exemple : 8vZ3kL9mN2pQ5rT6wX8yA1bC4dE7fG0h
+```
+
+## Troubleshooting
+
+### Le serveur ne démarre pas
+
+**Erreur : `JWT_SECRET environment variable is required`**
+→ Créez un fichier `.env` avec `JWT_SECRET=votre-secret`
+
+**Erreur : `bind: address already in use`**
+→ Un autre processus utilise le port 8080. Changez le `PORT` dans `.env` ou tuez le processus :
+```bash
+# Windows
+netstat -ano | findstr :8080
+taskkill //F //PID <PID>
+
+# Linux/Mac
+lsof -i :8080
+kill -9 <PID>
+```
+
+### Routes 404
+
+**Problème : Toutes les routes retournent 404**
+→ Vérifiez que vous avez bien redémarré le serveur après les modifications
+
+**Problème : `/dev/generate-token` retourne 404**
+→ Vérifiez que le code dans `cmd/server/main.go` inclut bien l'endpoint
+
+### Authentification échoue
+
+**Erreur : `Invalid or expired token`**
+→ Le `JWT_SECRET` n'est pas le même entre le générateur et le validateur
+
+**Erreur : `Invalid token issuer`**
+→ Le claim `iss` du token ne correspond pas à `JWT_ISSUER` dans la config
+
+## Roadmap
+
+- [ ] Rate limiting par IP/utilisateur
+- [ ] Métriques Prometheus (`/metrics`)
+- [ ] Support CORS configurable
+- [ ] Circuit breaker pour les services downstream
+- [ ] Load balancing multiple instances
+- [ ] Tests unitaires complets
+- [ ] Health check des services downstream
+
 ## Licence
 
 MIT
+
+---
+
+**Développé par ReTiCh Corp** | [Documentation complète](https://github.com/ReTiCh-Corp/ReTiCh-API-Gateway)
+
+---
+
+**Développé par ReTiCh Corp** | [Documentation complète](https://github.com/ReTiCh-Corp/ReTiCh-API-Gateway)
