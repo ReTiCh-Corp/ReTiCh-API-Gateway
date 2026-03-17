@@ -21,6 +21,24 @@ type HealthResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[CORS] %s %s | Origin: %q | Headers: %v", r.Method, r.URL.Path, r.Header.Get("Origin"), r.Header)
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == http.MethodOptions {
+			log.Printf("[CORS] Preflight handled for %s", r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -48,9 +66,20 @@ func main() {
 		messagingProxy.ServeHTTP(w, r)
 	})
 
+	// CORS configuration
+	appEnv := os.Getenv("APP_ENV")
+	log.Printf("[ENV] APP_ENV=%q", appEnv)
+	var handler http.Handler = r
+	if appEnv == "development" {
+		log.Println("[ENV] Development mode: CORS accepting all origins")
+		handler = corsMiddleware(r)
+	} else {
+		log.Printf("[ENV] CORS middleware NOT active (APP_ENV=%q, expected \"development\")", appEnv)
+	}
+
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      r,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
