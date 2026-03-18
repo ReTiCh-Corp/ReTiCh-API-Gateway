@@ -15,6 +15,12 @@ const (
 	UserIDKey    contextKey = "userID"
 	UserEmailKey contextKey = "userEmail"
 	UserRoleKey  contextKey = "userRole"
+
+	headerUserID    = "X-User-ID"
+	headerUserEmail = "X-User-Email"
+	headerUserRole  = "X-User-Role"
+	headerAuth      = "Authorization"
+	bearerPrefix    = "Bearer "
 )
 
 // AuthMiddleware valide les JWT signés avec HMAC HS256 (usage local/dev).
@@ -55,9 +61,9 @@ func enrichRequest(r *http.Request, claims jwt.MapClaims) *http.Request {
 	email := getClaimString(claims, "email")
 	role := getClaimString(claims, "role")
 
-	r.Header.Set("X-User-ID", userID)
-	r.Header.Set("X-User-Email", email)
-	r.Header.Set("X-User-Role", role)
+	r.Header.Set(headerUserID, userID)
+	r.Header.Set(headerUserEmail, email)
+	r.Header.Set(headerUserRole, role)
 
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, UserIDKey, userID)
@@ -69,13 +75,13 @@ func enrichRequest(r *http.Request, claims jwt.MapClaims) *http.Request {
 // ValidateJWT est un middleware qui rejette les requêtes sans token valide.
 func (am *AuthMiddleware) ValidateJWT(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
+		authHeader := r.Header.Get(headerAuth)
 		if authHeader == "" {
 			http.Error(w, "Authorization header required", http.StatusUnauthorized)
 			return
 		}
 
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		tokenString := strings.TrimPrefix(authHeader, bearerPrefix)
 		if tokenString == authHeader {
 			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
 			return
@@ -94,9 +100,9 @@ func (am *AuthMiddleware) ValidateJWT(next http.Handler) http.Handler {
 // OptionalJWT est un middleware qui passe sans token, mais enrichit la requête si un token valide est présent.
 func (am *AuthMiddleware) OptionalJWT(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
+		authHeader := r.Header.Get(headerAuth)
 		if authHeader != "" {
-			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+			tokenString := strings.TrimPrefix(authHeader, bearerPrefix)
 			if tokenString != authHeader {
 				if claims, err := am.parseAndValidateToken(tokenString); err == nil {
 					r = enrichRequest(r, claims)

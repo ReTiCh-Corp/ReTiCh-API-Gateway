@@ -24,6 +24,11 @@ type HealthResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
+const (
+	contentTypeHeader = "Content-Type"
+	contentTypeJSON   = "application/json"
+)
+
 func main() {
 	// Charger le fichier .env si présent (ignore l'erreur si absent)
 	_ = godotenv.Load()
@@ -111,17 +116,17 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		Service:   "api-gateway",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(response)
 }
 
 func readyHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	w.WriteHeader(http.StatusNotFound)
 	json.NewEncoder(w).Encode(map[string]string{
 		"error": "route not found",

@@ -8,6 +8,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const (
+	contentTypeHeader = "Content-Type"
+	contentTypeJSON   = "application/json"
+)
+
 // TokenRequest représente le corps de la requête pour générer un token.
 type TokenRequest struct {
 	UserID   string `json:"user_id"`
@@ -90,7 +95,7 @@ func (h *DevToolsHandler) GenerateToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(TokenResponse{
 		AccessToken:  accessTokenString,
 		RefreshToken: refreshTokenString,
