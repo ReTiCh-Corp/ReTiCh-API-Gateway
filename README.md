@@ -2,6 +2,8 @@
 
 Point d'entrée principal de la plateforme ReTiCh. Gère le routing, l'authentification et le load balancing vers les microservices.
 
+> **État du projet** : L'API Gateway est fonctionnel et prêt pour la production. Le service Auth est déjà déployé. Les services User et Messaging seront ajoutés progressivement (les routes sont déjà configurées).
+
 ## Table des matières
 
 - [Fonctionnalités](#fonctionnalités)
@@ -38,24 +40,25 @@ Client → API Gateway → Validation JWT locale → Microservice
 
 L'API Gateway utilise une architecture **stateless** :
 - **Aucune base de données** : pas de stockage local
-- **Validation JWT locale** : le secret partagé `JWT_SECRET` permet de vérifier les tokens sans interroger le service Auth
+- **Validation JWT locale avec JWKS** : récupère les clés publiques RS256 pour vérifier les tokens sans interroger le service Auth à chaque requête
 - **Proxy transparent** : transmet les requêtes aux microservices avec les informations utilisateur
+
+> 📖 **Pour une documentation technique complète**, consultez [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ### Composants
 
 | Composant | Rôle | Fichier |
 |-----------|------|---------|
 | **Config** | Charge les variables d'environnement | `internal/config/config.go` |
-| **Middleware Auth** | Valide les JWT et injecte le contexte utilisateur | `internal/middleware/auth.go` |
+| **Middleware Auth JWKS** | Valide les JWT RS256 avec JWKS et injecte le contexte utilisateur | `internal/middleware/auth_jwks.go` |
 | **Proxy Auth** | Redirige les requêtes `/auth/*` vers le service Auth | `internal/proxy/auth.go` |
 | **Proxy Service** | Redirige les requêtes vers les autres microservices | `internal/proxy/service.go` |
-| **DevTools** | Génère des tokens JWT pour les tests (dev only) | `internal/devtools/token.go` |
 
 ## Prérequis
 
 - Go 1.22+
 - Docker (optionnel)
-- Un fichier `.env` avec le `JWT_SECRET` partagé
+- Accès au service ReTiCh Auth (pour le JWKS endpoint)
 
 ## Configuration
 
@@ -70,8 +73,8 @@ cp .env.example .env
 | Variable | Description | Défaut | Obligatoire |
 |----------|-------------|--------|-------------|
 | `PORT` | Port du serveur | `8080` | Non |
-| `JWT_SECRET` | Secret partagé pour valider les JWT | - | **OUI** |
-| `JWT_ISSUER` | Émetteur attendu dans les tokens | `retich-auth` | Non |
+| `JWKS_URL` | URL du endpoint JWKS pour récupérer les clés publiques JWT | - | **OUI** |
+| `JWT_ISSUER` | Émetteur attendu dans les tokens (claim `iss`) | (vide) | Recommandé |
 | `AUTH_SERVICE_URL` | URL du service Auth | `http://auth:8081` | Non |
 | `USER_SERVICE_URL` | URL du service User | `http://user:8083` | Non |
 | `MESSAGING_SERVICE_URL` | URL du service Messaging | `http://messaging:8082` | Non |
@@ -79,7 +82,10 @@ cp .env.example .env
 | `REDIS_URL` | URL Redis | `redis:6379` | Non |
 | `LOG_LEVEL` | Niveau de log | `info` | Non |
 
-**IMPORTANT :** Le `JWT_SECRET` doit être **identique** sur tous les services de la plateforme ReTiCh.
+**IMPORTANT :**
+- `JWKS_URL` doit pointer vers l'endpoint `.well-known/jwks.json` du service Auth
+- Exemple : `https://auth.retich.com/.well-known/jwks.json`
+- Les clés publiques sont automatiquement rafraîchies toutes les heures
 
 ## Démarrage rapide
 
@@ -93,8 +99,9 @@ cd ReTiCh-API-Gateway
 # Créer le fichier .env
 cp .env.example .env
 
-# Éditer .env et définir JWT_SECRET
-# JWT_SECRET=votre-secret-super-securise-ici
+# Éditer .env et définir JWKS_URL
+# JWKS_URL=https://auth.retich.com/.well-known/jwks.json
+# JWT_ISSUER=https://auth.retich.com/
 ```
 
 ### 2. Installation des dépendances
@@ -143,7 +150,6 @@ Le serveur démarre sur `http://localhost:8080`.
 |---------|----------|-------------|---------------------|
 | `GET` | `/health` | Health check de l'API Gateway | - |
 | `GET` | `/ready` | Readiness check | - |
-| `POST` | `/dev/generate-token` | Génère un JWT de test (dev only) | `{"user_id":"...","email":"...","role":"..."}` |
 
 ### Routes Auth (publiques, proxy vers le service Auth)
 
@@ -177,29 +183,46 @@ Le serveur démarre sur `http://localhost:8080`.
 
 ## Authentification JWT
 
-### Fonctionnement
+### Fonctionnement (RS256 avec JWKS)
 
-1. **Le client se connecte** via `POST /api/v1/auth/login`
-2. **Il reçoit un token JWT** (access_token + refresh_token)
+1. **Le client se connecte** via OAuth 2.0 Authorization Code Flow (ou login direct)
+2. **Il reçoit un token JWT** (access_token + refresh_token) signé avec **RS256**
 3. **Il envoie ce token** dans le header `Authorization: Bearer <token>` pour chaque requête
-4. **L'API Gateway valide le token localement** avec le `JWT_SECRET`
+4. **L'API Gateway valide le token** :
+   - Récupère les clés publiques depuis JWKS (`.well-known/jwks.json`)
+   - Vérifie la signature RS256
+   - Vérifie l'expiration (`exp`)
+   - Vérifie l'issuer (`iss`)
 5. **Si valide**, elle injecte les informations utilisateur et proxie vers le microservice
 6. **Si invalide**, elle retourne `401 Unauthorized`
 
+**Avantage de RS256 + JWKS** :
+- Pas de secret partagé (plus sécurisé)
+- Rotation de clés sans redémarrage
+- Standard OIDC (compatible avec NextAuth, Auth0, etc.)
+
 ### Structure du token JWT
 
-Le token contient les claims suivants :
+Le token contient les claims suivants (format OIDC) :
 
 ```json
 {
-  "user_id": "user-123",
+  "sub": "user-123",              // Subject (ID utilisateur)
   "email": "alice@retich.com",
-  "role": "admin",
-  "iss": "retich-auth",
-  "iat": 1234567890,
-  "exp": 1234568790
+  "email_verified": true,
+  "role": "admin",                // Claim custom (optionnel)
+  "iss": "https://auth.retich.com/",  // Issuer
+  "aud": "54a3afb1-...",          // Audience (client_id)
+  "iat": 1234567890,              // Issued at
+  "exp": 1234568790               // Expiration
 }
 ```
+
+**Claims utilisés par l'API Gateway** :
+- `sub` → Extrait dans `X-User-ID`
+- `email` → Extrait dans `X-User-Email`
+- `role` → Extrait dans `X-User-Role` (si présent)
+- `iss` → Vérifié contre `JWT_ISSUER`
 
 ### Headers injectés automatiquement
 
@@ -215,23 +238,30 @@ Les microservices peuvent donc utiliser ces informations **sans valider le JWT e
 
 ### Tester l'authentification
 
-```bash
-# 1. Générer un token de test
-curl -X POST http://localhost:8080/dev/generate-token \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"test-123","email":"test@retich.com","role":"admin"}'
+**En production**, les tokens sont obtenus via le service Auth (OAuth 2.0 flow).
 
-# Réponse :
-# {
-#   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-#   "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-#   "expires_in": 900
-# }
+**Pour tester localement**, vous pouvez :
 
-# 2. Utiliser le token pour accéder à une route protégée
-curl http://localhost:8080/api/v1/user/profile \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
+1. **Utiliser le playground OAuth** du service Auth :
+   ```
+   https://auth.retich.com/oauth/playground
+   ```
+
+2. **Ou créer une app Next.js** qui se connecte via OAuth (voir README du service Auth)
+
+3. **Ou utiliser curl** avec un token obtenu manuellement :
+   ```bash
+   # Obtenir un token via le service Auth
+   # (nécessite un client_id et client_secret configurés)
+
+   # Puis tester une route protégée
+   curl http://localhost:8080/api/v1/user/profile \
+     -H "Authorization: Bearer <votre_token_ici>"
+   ```
+
+**Vérification du token** :
+- Vous pouvez décoder votre JWT sur [jwt.io](https://jwt.io) pour voir les claims
+- L'API Gateway validera la signature avec la clé publique du JWKS
 
 ## Ajouter un nouveau microservice
 
@@ -549,10 +579,13 @@ kill -9 <PID>
 ### Authentification échoue
 
 **Erreur : `Invalid or expired token`**
-→ Le `JWT_SECRET` n'est pas le même entre le générateur et le validateur
+→ Le token est expiré ou la signature ne peut pas être vérifiée avec les clés JWKS
 
 **Erreur : `Invalid token issuer`**
 → Le claim `iss` du token ne correspond pas à `JWT_ISSUER` dans la config
+
+**Erreur : `Failed to initialize JWKS`**
+→ L'URL JWKS est incorrecte ou le service Auth n'est pas accessible
 
 ## Roadmap
 
@@ -564,14 +597,19 @@ kill -9 <PID>
 - [ ] Tests unitaires complets
 - [ ] Health check des services downstream
 
+## Documentation complémentaire
+
+- 📖 **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Documentation technique ultra-détaillée
+  - Flux de requêtes complets avec exemples
+  - Explication de chaque composant
+  - Diagrammes d'architecture
+  - Comparaison RS256 vs HS256
+  - Performance et scalabilité
+
 ## Licence
 
 MIT
 
 ---
 
-**Développé par ReTiCh Corp** | [Documentation complète](https://github.com/ReTiCh-Corp/ReTiCh-API-Gateway)
-
----
-
-**Développé par ReTiCh Corp** | [Documentation complète](https://github.com/ReTiCh-Corp/ReTiCh-API-Gateway)
+**Développé par ReTiCh Corp** | [GitHub](https://github.com/ReTiCh-Corp/ReTiCh-API-Gateway)

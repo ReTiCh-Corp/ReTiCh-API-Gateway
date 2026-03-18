@@ -6,21 +6,21 @@ import (
 )
 
 type Config struct {
-	Port              string
-	JWTSecret         string
-	JWTIssuer         string
-	AuthServiceURL    string
-	UserServiceURL    string
+	Port                string
+	JWKSURL             string
+	JWTIssuer           string
+	AuthServiceURL      string
+	UserServiceURL      string
 	MessagingServiceURL string
-	NatsURL           string
-	RedisURL          string
-	LogLevel          string
+	NatsURL             string
+	RedisURL            string
+	LogLevel            string
 }
 
 func Load() *Config {
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		log.Fatal("JWT_SECRET environment variable is required")
+	jwksURL := os.Getenv("JWKS_URL")
+	if jwksURL == "" {
+		log.Fatal("JWKS_URL environment variable is required")
 	}
 
 	authServiceURL := os.Getenv("AUTH_SERVICE_URL")
@@ -30,8 +30,8 @@ func Load() *Config {
 
 	return &Config{
 		Port:                getEnv("PORT", "8080"),
-		JWTSecret:           jwtSecret,
-		JWTIssuer:           getEnv("JWT_ISSUER", "retich-auth"),
+		JWKSURL:             jwksURL,
+		JWTIssuer:           getEnv("JWT_ISSUER", ""),
 		AuthServiceURL:      authServiceURL,
 		UserServiceURL:      getEnv("USER_SERVICE_URL", "http://user:8083"),
 		MessagingServiceURL: getEnv("MESSAGING_SERVICE_URL", "http://messaging:8082"),

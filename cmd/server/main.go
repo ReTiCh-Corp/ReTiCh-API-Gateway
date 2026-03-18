@@ -14,7 +14,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	"github.com/retich-corp/api-gateway/internal/config"
-	"github.com/retich-corp/api-gateway/internal/devtools"
 	"github.com/retich-corp/api-gateway/internal/middleware"
 	"github.com/retich-corp/api-gateway/internal/proxy"
 )
@@ -32,25 +31,23 @@ func main() {
 	// Charger la configuration
 	cfg := config.Load()
 
-	// Initialiser les middlewares
-	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, cfg.JWTIssuer)
+	// Initialiser le middleware d'authentification avec JWKS
+	authMiddleware, err := middleware.NewAuthMiddlewareJWKS(cfg.JWKSURL, cfg.JWTIssuer)
+	if err != nil {
+		log.Fatalf("Failed to initialize JWKS: %v", err)
+	}
+	defer authMiddleware.Close()
 
 	// Initialiser les proxies
 	authProxy := proxy.NewAuthProxy(cfg.AuthServiceURL)
 	userProxy := proxy.NewServiceProxy(cfg.UserServiceURL)
 	messagingProxy := proxy.NewServiceProxy(cfg.MessagingServiceURL)
 
-	// Initialiser les dev tools
-	devToolsHandler := devtools.NewDevToolsHandler(cfg.JWTSecret, cfg.JWTIssuer)
-
 	r := mux.NewRouter()
 
 	// Routes publiques (health checks)
 	r.HandleFunc("/health", healthHandler).Methods("GET")
 	r.HandleFunc("/ready", readyHandler).Methods("GET")
-
-	// Routes de développement (générer des tokens de test)
-	r.HandleFunc("/dev/generate-token", devToolsHandler.GenerateToken).Methods("POST")
 
 	// Routes auth (publiques, proxy vers auth service)
 	authRouter := r.PathPrefix("/api/v1/auth").Subrouter()
