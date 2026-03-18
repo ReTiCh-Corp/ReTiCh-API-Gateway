@@ -29,20 +29,11 @@ const (
 	contentTypeJSON   = "application/json"
 )
 
-func main() {
-	// Charger le fichier .env si présent (ignore l'erreur si absent)
-	_ = godotenv.Load()
+type JWTValidator interface {
+	ValidateJWT(next http.Handler) http.Handler
+}
 
-	// Charger la configuration
-	cfg := config.Load()
-
-	// Initialiser le middleware d'authentification avec JWKS
-	authMiddleware, err := middleware.NewAuthMiddlewareJWKS(cfg.JWKSURL, cfg.JWTIssuer)
-	if err != nil {
-		log.Fatalf("Failed to initialize JWKS: %v", err)
-	}
-	defer authMiddleware.Close()
-
+func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	// Initialiser les proxies
 	authProxy := proxy.NewAuthProxy(cfg.AuthServiceURL)
 	userProxy := proxy.NewServiceProxy(cfg.UserServiceURL)
@@ -74,14 +65,37 @@ func main() {
 	// Catch-all pour routes inconnues
 	r.NotFoundHandler = http.HandlerFunc(notFoundHandler)
 
-	// Configuration du serveur
-	srv := &http.Server{
+	return r
+}
+
+func newHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      loggingMiddleware(r),
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+}
+
+func main() {
+	// Charger le fichier .env si présent (ignore l'erreur si absent)
+	_ = godotenv.Load()
+
+	// Charger la configuration
+	cfg := config.Load()
+
+	// Initialiser le middleware d'authentification avec JWKS
+	authMiddleware, err := middleware.NewAuthMiddlewareJWKS(cfg.JWKSURL, cfg.JWTIssuer)
+	if err != nil {
+		log.Fatalf("Failed to initialize JWKS: %v", err)
+	}
+	defer authMiddleware.Close()
+
+	r := buildRouter(cfg, authMiddleware)
+
+	// Configuration du serveur
+	srv := newHTTPServer(cfg, loggingMiddleware(r))
 
 	// Démarrage du serveur
 	go func() {

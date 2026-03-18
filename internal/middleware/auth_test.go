@@ -160,6 +160,23 @@ func TestOptionalJWT_NoToken(t *testing.T) {
 	}
 }
 
+func TestGetClaimString(t *testing.T) {
+	claims := jwt.MapClaims{
+		"email": "a@b.com",
+		"age":   12,
+	}
+
+	if got := getClaimString(claims, "email"); got != "a@b.com" {
+		t.Fatalf("expected a@b.com, got %s", got)
+	}
+	if got := getClaimString(claims, "age"); got != "" {
+		t.Fatalf("expected empty string for non-string claim, got %s", got)
+	}
+	if got := getClaimString(claims, "missing"); got != "" {
+		t.Fatalf("expected empty string for missing claim, got %s", got)
+	}
+}
+
 // Helper pour créer un token de test
 func createTestToken(secret, issuer, userID, email, role string) string {
 	claims := jwt.MapClaims{
