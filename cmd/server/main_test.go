@@ -188,7 +188,7 @@ func TestConversationsHandler_PostRequest(t *testing.T) {
 func TestNewRouter_HealthRoute(t *testing.T) {
 	backendURL, _ := url.Parse("http://localhost:9999")
 	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	router := newRouter(proxy)
+	router := newRouter(proxy, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -211,7 +211,7 @@ func TestNewRouter_HealthRoute(t *testing.T) {
 func TestNewRouter_ReadyRoute(t *testing.T) {
 	backendURL, _ := url.Parse("http://localhost:9999")
 	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	router := newRouter(proxy)
+	router := newRouter(proxy, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
@@ -231,7 +231,7 @@ func TestNewRouter_ConversationsRoute(t *testing.T) {
 
 	backendURL, _ := url.Parse(backend.URL)
 	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	router := newRouter(proxy)
+	router := newRouter(proxy, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/conversations", nil)
 	rec := httptest.NewRecorder()
@@ -251,7 +251,7 @@ func TestNewRouter_ConversationsSubpath(t *testing.T) {
 
 	backendURL, _ := url.Parse(backend.URL)
 	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	router := newRouter(proxy)
+	router := newRouter(proxy, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/conversations/123/messages", nil)
 	rec := httptest.NewRecorder()
@@ -266,7 +266,7 @@ func TestNewRouter_ConversationsSubpath(t *testing.T) {
 func TestNewRouter_UnknownRoute(t *testing.T) {
 	backendURL, _ := url.Parse("http://localhost:9999")
 	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	router := newRouter(proxy)
+	router := newRouter(proxy, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	rec := httptest.NewRecorder()
@@ -281,7 +281,7 @@ func TestNewRouter_UnknownRoute(t *testing.T) {
 func TestHealthHandler_MethodNotAllowed(t *testing.T) {
 	backendURL, _ := url.Parse("http://localhost:9999")
 	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	router := newRouter(proxy)
+	router := newRouter(proxy, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/health", nil)
 	rec := httptest.NewRecorder()
