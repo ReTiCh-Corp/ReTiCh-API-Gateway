@@ -39,6 +39,22 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func conversationsHandler(proxy *httputil.ReverseProxy) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// TODO: replace with real authentication
+		r.Header.Set("X-User-ID", "11111111-1111-1111-1111-111111111111")
+		proxy.ServeHTTP(w, r)
+	}
+}
+
+func newRouter(messagingProxy *httputil.ReverseProxy) *mux.Router {
+	r := mux.NewRouter()
+	r.HandleFunc("/health", healthHandler).Methods("GET")
+	r.HandleFunc("/ready", readyHandler).Methods("GET")
+	r.PathPrefix("/conversations").HandlerFunc(conversationsHandler(messagingProxy))
+	return r
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -57,14 +73,7 @@ func main() {
 	messagingProxy := httputil.NewSingleHostReverseProxy(messagingTarget)
 	log.Printf("Messaging proxy configured → %s", messagingURL)
 
-	r := mux.NewRouter()
-	r.HandleFunc("/health", healthHandler).Methods("GET")
-	r.HandleFunc("/ready", readyHandler).Methods("GET")
-	r.PathPrefix("/conversations").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: replace with real authentication
-		r.Header.Set("X-User-ID", "11111111-1111-1111-1111-111111111111")
-		messagingProxy.ServeHTTP(w, r)
-	})
+	r := newRouter(messagingProxy)
 
 	// CORS configuration
 	appEnv := os.Getenv("APP_ENV")
