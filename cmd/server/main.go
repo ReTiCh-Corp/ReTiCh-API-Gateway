@@ -53,8 +53,14 @@ func conversationsHandler(proxy *httputil.ReverseProxy) http.HandlerFunc {
 	}
 }
 
-func newRouter(messagingProxy *httputil.ReverseProxy) *mux.Router {
+func newRouter(messagingProxy *httputil.ReverseProxy, corsOrigin string) *mux.Router {
 	r := mux.NewRouter()
+
+	if corsOrigin != "" {
+		r.Use(corsMiddleware(corsOrigin))
+		log.Printf("[CORS] Middleware active with origin %q", corsOrigin)
+	}
+
 	r.HandleFunc("/health", healthHandler).Methods("GET")
 	r.HandleFunc("/ready", readyHandler).Methods("GET")
 	r.PathPrefix("/conversations").HandlerFunc(conversationsHandler(messagingProxy))
@@ -79,28 +85,28 @@ func main() {
 	messagingProxy := httputil.NewSingleHostReverseProxy(messagingTarget)
 	log.Printf("Messaging proxy configured → %s", messagingURL)
 
-	r := newRouter(messagingProxy)
-
 	// CORS configuration
 	appEnv := os.Getenv("APP_ENV")
 	log.Printf("[ENV] APP_ENV=%q", appEnv)
-	var handler http.Handler = r
+	var corsOrigin string
 	if appEnv == "development" {
 		log.Println("[ENV] Development mode: CORS accepting all origins")
-		handler = corsMiddleware("*")(r)
+		corsOrigin = "*"
 	} else {
 		clientURL := os.Getenv("CLIENT_URL")
 		if clientURL != "" {
 			log.Printf("[ENV] Production mode: CORS accepting origin %q", clientURL)
-			handler = corsMiddleware(clientURL)(r)
+			corsOrigin = clientURL
 		} else {
 			log.Println("[ENV] Production mode: CLIENT_URL not set, CORS middleware not active")
 		}
 	}
 
+	r := newRouter(messagingProxy, corsOrigin)
+
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      handler,
+		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
