@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,19 +21,74 @@ type HealthResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[CORS] %s %s | Origin: %q | Headers: %v", r.Method, r.URL.Path, r.Header.Get("Origin"), r.Header)
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == http.MethodOptions {
+			log.Printf("[CORS] Preflight handled for %s", r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func conversationsHandler(proxy *httputil.ReverseProxy) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// TODO: replace with real authentication
+		r.Header.Set("X-User-ID", "11111111-1111-1111-1111-111111111111")
+		proxy.ServeHTTP(w, r)
+	}
+}
+
+func newRouter(messagingProxy *httputil.ReverseProxy) *mux.Router {
+	r := mux.NewRouter()
+	r.HandleFunc("/health", healthHandler).Methods("GET")
+	r.HandleFunc("/ready", readyHandler).Methods("GET")
+	r.PathPrefix("/conversations").HandlerFunc(conversationsHandler(messagingProxy))
+	return r
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	r := mux.NewRouter()
-	r.HandleFunc("/health", healthHandler).Methods("GET")
-	r.HandleFunc("/ready", readyHandler).Methods("GET")
+	// Messaging service reverse proxy
+	messagingURL := os.Getenv("MESSAGING_SERVICE_URL")
+	if messagingURL == "" {
+		messagingURL = "http://localhost:8082"
+	}
+	messagingTarget, err := url.Parse(messagingURL)
+	if err != nil {
+		log.Fatalf("Invalid MESSAGING_SERVICE_URL: %v", err)
+	}
+	messagingProxy := httputil.NewSingleHostReverseProxy(messagingTarget)
+	log.Printf("Messaging proxy configured → %s", messagingURL)
+
+	r := newRouter(messagingProxy)
+
+	// CORS configuration
+	appEnv := os.Getenv("APP_ENV")
+	log.Printf("[ENV] APP_ENV=%q", appEnv)
+	var handler http.Handler = r
+	if appEnv == "development" {
+		log.Println("[ENV] Development mode: CORS accepting all origins")
+		handler = corsMiddleware(r)
+	} else {
+		log.Printf("[ENV] CORS middleware NOT active (APP_ENV=%q, expected \"development\")", appEnv)
+	}
 
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      r,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
