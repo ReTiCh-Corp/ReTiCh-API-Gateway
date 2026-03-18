@@ -7,6 +7,7 @@ import (
 
 type Config struct {
 	Port                string
+	JWTSecret           string
 	JWKSURL             string
 	JWTIssuer           string
 	AuthServiceURL      string
@@ -20,8 +21,10 @@ type Config struct {
 func Load() *Config {
 	jwksURL := os.Getenv("JWKS_URL")
 	if jwksURL == "" {
-		log.Fatal("JWKS_URL environment variable is required")
+		log.Println("Warning: JWKS_URL not set, JWKS-based JWT validation will be unavailable")
 	}
+
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	authServiceURL := os.Getenv("AUTH_SERVICE_URL")
 	if authServiceURL == "" {
@@ -30,8 +33,9 @@ func Load() *Config {
 
 	return &Config{
 		Port:                getEnv("PORT", "8080"),
+		JWTSecret:           jwtSecret,
 		JWKSURL:             jwksURL,
-		JWTIssuer:           getEnv("JWT_ISSUER", ""),
+		JWTIssuer:           getEnv("JWT_ISSUER", "retich-auth"),
 		AuthServiceURL:      authServiceURL,
 		UserServiceURL:      getEnv("USER_SERVICE_URL", "http://user:8083"),
 		MessagingServiceURL: getEnv("MESSAGING_SERVICE_URL", "http://messaging:8082"),
