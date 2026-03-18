@@ -21,22 +21,28 @@ type HealthResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[CORS] %s %s | Origin: %q | Headers: %v", r.Method, r.URL.Path, r.Header.Get("Origin"), r.Header)
+func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("[CORS] %s %s | Origin: %q", r.Method, r.URL.Path, r.Header.Get("Origin"))
 
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		if r.Method == http.MethodOptions {
-			log.Printf("[CORS] Preflight handled for %s", r.URL.Path)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+			if allowedOrigin != "*" {
+				w.Header().Set("Vary", "Origin")
+			}
 
-		next.ServeHTTP(w, r)
-	})
+			if r.Method == http.MethodOptions {
+				log.Printf("[CORS] Preflight handled for %s", r.URL.Path)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func conversationsHandler(proxy *httputil.ReverseProxy) http.HandlerFunc {
@@ -81,9 +87,15 @@ func main() {
 	var handler http.Handler = r
 	if appEnv == "development" {
 		log.Println("[ENV] Development mode: CORS accepting all origins")
-		handler = corsMiddleware(r)
+		handler = corsMiddleware("*")(r)
 	} else {
-		log.Printf("[ENV] CORS middleware NOT active (APP_ENV=%q, expected \"development\")", appEnv)
+		clientURL := os.Getenv("CLIENT_URL")
+		if clientURL != "" {
+			log.Printf("[ENV] Production mode: CORS accepting origin %q", clientURL)
+			handler = corsMiddleware(clientURL)(r)
+		} else {
+			log.Println("[ENV] Production mode: CLIENT_URL not set, CORS middleware not active")
+		}
 	}
 
 	srv := &http.Server{
