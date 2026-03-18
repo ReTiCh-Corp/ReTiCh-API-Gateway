@@ -68,7 +68,7 @@ func TestCorsMiddleware_PreflightRequest(t *testing.T) {
 		t.Error("inner handler should not be called on preflight")
 	})
 
-	handler := corsMiddleware(inner)
+	handler := corsMiddleware("*")(inner)
 	req := httptest.NewRequest(http.MethodOptions, "/test", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 	rec := httptest.NewRecorder()
@@ -97,7 +97,7 @@ func TestCorsMiddleware_RegularRequest(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := corsMiddleware(inner)
+	handler := corsMiddleware("*")(inner)
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 	rec := httptest.NewRecorder()
@@ -122,7 +122,7 @@ func TestCorsMiddleware_NoOrigin(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := corsMiddleware(inner)
+	handler := corsMiddleware("*")(inner)
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	rec := httptest.NewRecorder()
 
