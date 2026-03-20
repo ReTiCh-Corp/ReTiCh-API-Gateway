@@ -1,4 +1,66 @@
-.github
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Air (hot-reload) temporary files
+tmp/
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Build artifacts
+*.tar.gz
+*.zip
+
+# OS files
+Thumbs.db
+desktop.ini
+
+# Docker volumes
+data/
+volumes/
+
+# Test files
+TEST.md
+/nul
+
+# Claude
 .claude
-.env*
-coverage.out
