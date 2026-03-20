@@ -33,6 +33,30 @@ type JWTValidator interface {
 	ValidateJWT(next http.Handler) http.Handler
 }
 
+func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("[CORS] %s %s | Origin: %q", r.Method, r.URL.Path, r.Header.Get("Origin"))
+
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+			if allowedOrigin != "*" {
+				w.Header().Set("Vary", "Origin")
+			}
+
+			if r.Method == http.MethodOptions {
+				log.Printf("[CORS] Preflight handled for %s", r.URL.Path)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	// Initialiser les proxies
 	authProxy := proxy.NewAuthProxy(cfg.AuthServiceURL)
@@ -40,6 +64,13 @@ func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	messagingProxy := proxy.NewServiceProxy(cfg.MessagingServiceURL)
 
 	r := mux.NewRouter()
+
+	// CORS middleware
+	corsOrigin := resolveCORSOrigin(cfg)
+	if corsOrigin != "" {
+		r.Use(corsMiddleware(corsOrigin))
+		log.Printf("[CORS] Middleware active with origin %q", corsOrigin)
+	}
 
 	// Routes publiques (health checks)
 	r.HandleFunc("/health", healthHandler).Methods("GET")
@@ -66,6 +97,19 @@ func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	r.NotFoundHandler = http.HandlerFunc(notFoundHandler)
 
 	return r
+}
+
+func resolveCORSOrigin(cfg *config.Config) string {
+	if cfg.AppEnv == "development" {
+		log.Println("[ENV] Development mode: CORS accepting all origins")
+		return "*"
+	}
+	if cfg.ClientURL != "" {
+		log.Printf("[ENV] Production mode: CORS accepting origin %q", cfg.ClientURL)
+		return cfg.ClientURL
+	}
+	log.Println("[ENV] Production mode: CLIENT_URL not set, CORS middleware not active")
+	return ""
 }
 
 func newHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {

@@ -239,3 +239,78 @@ func TestLoggingMiddleware_PassesThroughBody(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 }
+
+func TestCorsMiddleware_PreflightRequest(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("inner handler should not be called on preflight")
+	})
+
+	handler := corsMiddleware("*")(inner)
+	req := httptest.NewRequest(http.MethodOptions, "/test", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+	if v := rr.Header().Get("Access-Control-Allow-Origin"); v != "*" {
+		t.Fatalf("expected Access-Control-Allow-Origin '*', got %q", v)
+	}
+	if v := rr.Header().Get("Access-Control-Allow-Methods"); v == "" {
+		t.Fatal("expected Access-Control-Allow-Methods to be set")
+	}
+	if v := rr.Header().Get("Access-Control-Allow-Headers"); v == "" {
+		t.Fatal("expected Access-Control-Allow-Headers to be set")
+	}
+}
+
+func TestCorsMiddleware_RegularRequest(t *testing.T) {
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := corsMiddleware("*")(inner)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if !called {
+		t.Fatal("expected inner handler to be called")
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if v := rr.Header().Get("Access-Control-Allow-Origin"); v != "*" {
+		t.Fatalf("expected CORS headers on regular request, got %q", v)
+	}
+}
+
+func TestResolveCORSOrigin_Development(t *testing.T) {
+	cfg := &config.Config{AppEnv: "development"}
+	origin := resolveCORSOrigin(cfg)
+	if origin != "*" {
+		t.Fatalf("expected '*' for development, got %q", origin)
+	}
+}
+
+func TestResolveCORSOrigin_ProductionWithClientURL(t *testing.T) {
+	cfg := &config.Config{AppEnv: "production", ClientURL: "https://example.com"}
+	origin := resolveCORSOrigin(cfg)
+	if origin != "https://example.com" {
+		t.Fatalf("expected 'https://example.com', got %q", origin)
+	}
+}
+
+func TestResolveCORSOrigin_ProductionNoClientURL(t *testing.T) {
+	cfg := &config.Config{AppEnv: "production"}
+	origin := resolveCORSOrigin(cfg)
+	if origin != "" {
+		t.Fatalf("expected empty string, got %q", origin)
+	}
+}

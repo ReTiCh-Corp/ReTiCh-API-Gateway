@@ -52,7 +52,6 @@ logs/
 
 # OS files
 Thumbs.db
-.DS_Store
 desktop.ini
 
 # Docker volumes
@@ -62,3 +61,6 @@ volumes/
 # Test files
 TEST.md
 /nul
+
+# Claude
+.claude

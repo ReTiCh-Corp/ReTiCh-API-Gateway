@@ -7,6 +7,8 @@ import (
 
 type Config struct {
 	Port                string
+	AppEnv              string
+	ClientURL           string
 	JWTSecret           string
 	JWKSURL             string
 	JWTIssuer           string
@@ -33,6 +35,8 @@ func Load() *Config {
 
 	return &Config{
 		Port:                getEnv("PORT", "8080"),
+		AppEnv:              getEnv("APP_ENV", ""),
+		ClientURL:           getEnv("CLIENT_URL", ""),
 		JWTSecret:           jwtSecret,
 		JWKSURL:             jwksURL,
 		JWTIssuer:           getEnv("JWT_ISSUER", "retich-auth"),
