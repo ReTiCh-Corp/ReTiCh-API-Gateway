@@ -8,9 +8,12 @@ import (
 )
 
 func TestNewServiceProxy(t *testing.T) {
-	proxy := NewServiceProxy("http://user:8083")
+	proxy := NewServiceProxy("http://user:8083", "/api/v1")
 	if proxy.serviceURL != "http://user:8083" {
 		t.Errorf("Expected serviceURL to be http://user:8083, got %s", proxy.serviceURL)
+	}
+	if proxy.stripPrefix != "/api/v1" {
+		t.Errorf("Expected stripPrefix to be /api/v1, got %s", proxy.stripPrefix)
 	}
 }
 
@@ -28,7 +31,7 @@ func TestServiceProxyRequest_Success(t *testing.T) {
 	}))
 	defer mockService.Close()
 
-	proxy := NewServiceProxy(mockService.URL)
+	proxy := NewServiceProxy(mockService.URL, "/api/v1")
 
 	req := httptest.NewRequest("GET", "/api/v1/user/profile", nil)
 	req.Header.Set("X-User-ID", "user-123")
@@ -61,7 +64,7 @@ func TestServiceProxyRequest_PreservesHeaders(t *testing.T) {
 	}))
 	defer mockService.Close()
 
-	proxy := NewServiceProxy(mockService.URL)
+	proxy := NewServiceProxy(mockService.URL, "/api/v1")
 
 	req := httptest.NewRequest("GET", "/api/v1/user/profile", nil)
 	req.Header.Set("X-User-ID", "user-123")
@@ -86,7 +89,7 @@ func TestServiceProxyRequest_WithQueryParams(t *testing.T) {
 	}))
 	defer mockService.Close()
 
-	proxy := NewServiceProxy(mockService.URL)
+	proxy := NewServiceProxy(mockService.URL, "/api/v1")
 
 	req := httptest.NewRequest("GET", "/api/v1/user/list?page=1&limit=10", nil)
 	rr := httptest.NewRecorder()
@@ -108,7 +111,7 @@ func TestServiceProxyRequest_POST(t *testing.T) {
 	}))
 	defer mockService.Close()
 
-	proxy := NewServiceProxy(mockService.URL)
+	proxy := NewServiceProxy(mockService.URL, "/api/v1")
 
 	req := httptest.NewRequest("POST", "/api/v1/user", strings.NewReader(`{"name":"Bob"}`))
 	req.Header.Set("Content-Type", "application/json")

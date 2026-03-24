@@ -60,17 +60,10 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	// Initialiser les proxies
 	authProxy := proxy.NewAuthProxy(cfg.AuthServiceURL)
-	userProxy := proxy.NewServiceProxy(cfg.UserServiceURL)
-	messagingProxy := proxy.NewServiceProxy(cfg.MessagingServiceURL)
+	userProxy := proxy.NewServiceProxy(cfg.UserServiceURL, "/api/v1")
+	messagingProxy := proxy.NewServiceProxy(cfg.MessagingServiceURL, "/api/v1")
 
 	r := mux.NewRouter()
-
-	// CORS middleware
-	corsOrigin := resolveCORSOrigin(cfg)
-	if corsOrigin != "" {
-		r.Use(corsMiddleware(corsOrigin))
-		log.Printf("[CORS] Middleware active with origin %q", corsOrigin)
-	}
 
 	// Routes publiques (health checks)
 	r.HandleFunc("/health", healthHandler).Methods("GET")
@@ -84,14 +77,14 @@ func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	authRouter.HandleFunc("/logout", authProxy.HandleLogout).Methods("POST")
 
 	// Routes user (protégées par JWT)
-	userRouter := r.PathPrefix("/api/v1/user").Subrouter()
+	userRouter := r.PathPrefix("/api/v1/users").Subrouter()
 	userRouter.Use(authMiddleware.ValidateJWT)
-	userRouter.PathPrefix("/").HandlerFunc(userProxy.ProxyRequest)
+	userRouter.PathPrefix("").HandlerFunc(userProxy.ProxyRequest)
 
 	// Routes messaging (protégées par JWT)
-	messagingRouter := r.PathPrefix("/api/v1/messaging").Subrouter()
+	messagingRouter := r.PathPrefix("/api/v1/conversations").Subrouter()
 	messagingRouter.Use(authMiddleware.ValidateJWT)
-	messagingRouter.PathPrefix("/").HandlerFunc(messagingProxy.ProxyRequest)
+	messagingRouter.PathPrefix("").HandlerFunc(messagingProxy.ProxyRequest)
 
 	// Catch-all pour routes inconnues
 	r.NotFoundHandler = http.HandlerFunc(notFoundHandler)
@@ -138,8 +131,16 @@ func main() {
 
 	r := buildRouter(cfg, authMiddleware)
 
+	// Appliquer CORS au niveau serveur (wrappe tout, y compris NotFoundHandler)
+	var handler http.Handler = r
+	corsOrigin := resolveCORSOrigin(cfg)
+	if corsOrigin != "" {
+		handler = corsMiddleware(corsOrigin)(r)
+		log.Printf("[CORS] Middleware active with origin %q", corsOrigin)
+	}
+
 	// Configuration du serveur
-	srv := newHTTPServer(cfg, loggingMiddleware(r))
+	srv := newHTTPServer(cfg, loggingMiddleware(handler))
 
 	// Démarrage du serveur
 	go func() {
