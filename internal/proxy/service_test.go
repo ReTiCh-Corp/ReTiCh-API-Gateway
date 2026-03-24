@@ -123,3 +123,88 @@ func TestServiceProxyRequest_POST(t *testing.T) {
 		t.Errorf("Expected status 201, got %d", rr.Code)
 	}
 }
+
+// =============================================================================
+// resolveMe
+// =============================================================================
+
+func TestResolveMe_EndOfPath(t *testing.T) {
+	got := resolveMe("/users/me", "abc-123")
+	if got != "/users/abc-123" {
+		t.Errorf("expected /users/abc-123, got %s", got)
+	}
+}
+
+func TestResolveMe_MiddleOfPath(t *testing.T) {
+	got := resolveMe("/users/me/avatar", "abc-123")
+	if got != "/users/abc-123/avatar" {
+		t.Errorf("expected /users/abc-123/avatar, got %s", got)
+	}
+}
+
+func TestResolveMe_NoMatch_Meeting(t *testing.T) {
+	got := resolveMe("/users/meeting", "abc-123")
+	if got != "/users/meeting" {
+		t.Errorf("expected /users/meeting (unchanged), got %s", got)
+	}
+}
+
+func TestResolveMe_NoMatch_MeToo(t *testing.T) {
+	got := resolveMe("/users/me-too", "abc-123")
+	if got != "/users/me-too" {
+		t.Errorf("expected /users/me-too (unchanged), got %s", got)
+	}
+}
+
+func TestResolveMe_JustMe(t *testing.T) {
+	got := resolveMe("/me", "abc-123")
+	if got != "/abc-123" {
+		t.Errorf("expected /abc-123, got %s", got)
+	}
+}
+
+func TestServiceProxyRequest_ResolvesMe(t *testing.T) {
+	mockService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/user-uuid-456" {
+			t.Errorf("Expected path /users/user-uuid-456, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer mockService.Close()
+
+	proxy := NewServiceProxy(mockService.URL, "/api/v1")
+
+	req := httptest.NewRequest("PUT", "/api/v1/users/me", strings.NewReader(`{"username":"alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", "user-uuid-456")
+	rr := httptest.NewRecorder()
+
+	proxy.ProxyRequest(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+}
+
+func TestServiceProxyRequest_NoUserID_KeepsMe(t *testing.T) {
+	mockService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/me" {
+			t.Errorf("Expected path /users/me (unchanged), got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockService.Close()
+
+	proxy := NewServiceProxy(mockService.URL, "/api/v1")
+
+	req := httptest.NewRequest("GET", "/api/v1/users/me", nil)
+	// No X-User-ID header
+	rr := httptest.NewRecorder()
+
+	proxy.ProxyRequest(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+}
