@@ -86,6 +86,17 @@ func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	messagingRouter.Use(authMiddleware.ValidateJWT)
 	messagingRouter.PathPrefix("").HandlerFunc(messagingProxy.ProxyRequest)
 
+	// Route messages by ID (protégée par JWT)
+	messagesRouter := r.PathPrefix("/api/v1/messages").Subrouter()
+	messagesRouter.Use(authMiddleware.ValidateJWT)
+	messagesRouter.PathPrefix("").HandlerFunc(messagingProxy.ProxyRequest)
+
+	// WebSocket (protégé par JWT, proxy vers messaging service)
+	wsProxy := proxy.NewWebSocketProxy(cfg.MessagingServiceURL)
+	wsRouter := r.PathPrefix("/api/v1/ws").Subrouter()
+	wsRouter.Use(authMiddleware.ValidateJWT)
+	wsRouter.HandleFunc("", wsProxy.ProxyWS)
+
 	// Catch-all pour routes inconnues
 	r.NotFoundHandler = http.HandlerFunc(notFoundHandler)
 
