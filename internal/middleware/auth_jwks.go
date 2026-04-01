@@ -39,15 +39,20 @@ func NewAuthMiddlewareJWKS(jwksURL, jwtIssuer string) (*AuthMiddlewareJWKS, erro
 
 func (am *AuthMiddlewareJWKS) ValidateJWT(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get(headerAuth)
-		if authHeader == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
-			return
-		}
+		var tokenString string
 
-		tokenString := strings.TrimPrefix(authHeader, bearerPrefix)
-		if tokenString == authHeader {
-			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
+		authHeader := r.Header.Get(headerAuth)
+		if authHeader != "" {
+			tokenString = strings.TrimPrefix(authHeader, bearerPrefix)
+			if tokenString == authHeader {
+				http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
+				return
+			}
+		} else if qToken := r.URL.Query().Get("token"); qToken != "" {
+			// WebSocket connections cannot send headers; accept token as query param
+			tokenString = qToken
+		} else {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
 			return
 		}
 
