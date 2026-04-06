@@ -97,6 +97,9 @@ func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	wsRouter.Use(authMiddleware.ValidateJWT)
 	wsRouter.HandleFunc("", wsProxy.ProxyWS)
 
+	// Uploads (fichiers servis depuis le messaging service, pas de JWT requis)
+	r.PathPrefix("/api/v1/uploads/").HandlerFunc(messagingProxy.ProxyRequest)
+
 	// Catch-all pour routes inconnues
 	r.NotFoundHandler = http.HandlerFunc(notFoundHandler)
 
