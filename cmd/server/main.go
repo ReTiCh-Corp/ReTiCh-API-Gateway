@@ -76,6 +76,11 @@ func buildRouter(cfg *config.Config, authMiddleware JWTValidator) *mux.Router {
 	authRouter.HandleFunc("/refresh", authProxy.HandleRefresh).Methods("POST")
 	authRouter.HandleFunc("/logout", authProxy.HandleLogout).Methods("POST")
 
+	// Preflight OPTIONS pour toutes les routes API (doit être avant les middleware JWT)
+	r.Methods("OPTIONS").PathPrefix("/api/v1/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// Routes user (protégées par JWT)
 	userRouter := r.PathPrefix("/api/v1/users").Subrouter()
 	userRouter.Use(authMiddleware.ValidateJWT)
