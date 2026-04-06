@@ -27,7 +27,7 @@ func TestBuildRouter_RoutesAndProxies(t *testing.T) {
 	defer authUpstream.Close()
 
 	userUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/v1/user/") {
+		if !strings.HasPrefix(r.URL.Path, "/users/") {
 			t.Fatalf("unexpected user upstream path: %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
@@ -36,7 +36,7 @@ func TestBuildRouter_RoutesAndProxies(t *testing.T) {
 	defer userUpstream.Close()
 
 	messagingUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/v1/messaging/") {
+		if !strings.HasPrefix(r.URL.Path, "/conversations/") {
 			t.Fatalf("unexpected messaging upstream path: %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
@@ -78,7 +78,7 @@ func TestBuildRouter_RoutesAndProxies(t *testing.T) {
 
 	// User proxy (protected but passthrough) route
 	{
-		req := httptest.NewRequest("GET", "/api/v1/user/profile", nil)
+		req := httptest.NewRequest("GET", "/api/v1/users/profile", nil)
 		rr := httptest.NewRecorder()
 		r.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -91,7 +91,7 @@ func TestBuildRouter_RoutesAndProxies(t *testing.T) {
 
 	// Messaging proxy (protected but passthrough) route
 	{
-		req := httptest.NewRequest("GET", "/api/v1/messaging/inbox", nil)
+		req := httptest.NewRequest("GET", "/api/v1/conversations/inbox", nil)
 		rr := httptest.NewRecorder()
 		r.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
